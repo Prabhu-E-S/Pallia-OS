@@ -10,16 +10,22 @@ export interface CurrentUser {
   role: UserRole;
   organization_id: string;
   organization_name: string;
+  status: UserStatus;
   permissions: string[];
 }
 
-export interface DeviceLoginRequest {
+export type UserStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
+
+export interface LoginRequest {
   email: string;
+  password: string;
 }
 
-export interface DeviceLoginResponse {
+export interface TokenResponse {
   access_token: string;
   token_type: string;
+  expires_in: number;
+  refresh_token: string;
   user: CurrentUser;
 }
 
@@ -28,7 +34,8 @@ export type UserRole =
   | "CARE_COORDINATOR"
   | "NURSE"
   | "DOCTOR"
-  | "CAREGIVER";
+  | "CAREGIVER"
+  | "PATIENT";
 
 export type PatientStatus =
   | "ACTIVE"
@@ -146,7 +153,9 @@ export type ObservationSource =
   | "MANUAL"
   | "CAREGIVER_APP"
   | "PHONE"
-  | "OTHER";
+  | "OTHER"
+  | "CAREGIVER_TEXT"
+  | "CAREGIVER_VOICE";
 
 export interface Observation {
   id: string;
@@ -158,6 +167,11 @@ export interface Observation {
   notes: string | null;
   observed_at: string;
   source: ObservationSource | null;
+  source_reference: string | null;
+  ai_generated: boolean;
+  human_verified: boolean;
+  confidence: number | null;
+  model_version: string | null;
   created_at: string;
 }
 
@@ -311,7 +325,8 @@ export type TimelineItemKind =
   | "observation"
   | "visit"
   | "task"
-  | "communication";
+  | "communication"
+  | "caregiver_report";
 
 export interface TimelineItem {
   id: string;
@@ -323,6 +338,174 @@ export interface TimelineItem {
 
 export interface TimelineResponse {
   items: TimelineItem[];
+}
+
+export type CaregiverReportMode =
+  | "QUICK_STATUS"
+  | "STRUCTURED"
+  | "TEXT"
+  | "VOICE";
+
+export type CaregiverReportStatus =
+  | "DRAFT"
+  | "PROCESSING"
+  | "REVIEW_REQUIRED"
+  | "CONFIRMED"
+  | "CANCELLED";
+
+export interface CaregiverReportCreate {
+  patient_id: string;
+  mode: CaregiverReportMode;
+  reported_at?: string | null;
+  pain_level?: number | null;
+  sleep_hours?: string | null;
+  food_intake?: string | null;
+  mobility?: string | null;
+  mood?: string | null;
+  breathing?: string | null;
+  energy?: string | null;
+  general_concern?: string | null;
+  notes?: string | null;
+  transcript?: string | null;
+  audio_duration_seconds?: number | null;
+}
+
+export interface CaregiverReportUpdate {
+  reported_at?: string | null;
+  pain_level?: number | null;
+  sleep_hours?: string | null;
+  food_intake?: string | null;
+  mobility?: string | null;
+  mood?: string | null;
+  breathing?: string | null;
+  energy?: string | null;
+  general_concern?: string | null;
+  notes?: string | null;
+  transcript?: string | null;
+}
+
+export interface CaregiverReport {
+  id: string;
+  patient_id: string;
+  recorded_by: string | null;
+  recorded_by_name: string | null;
+  reported_at: string;
+  mode: CaregiverReportMode;
+  status: CaregiverReportStatus;
+  pain_level: number | null;
+  sleep_hours: string | null;
+  food_intake: string | null;
+  mobility: string | null;
+  mood: string | null;
+  breathing: string | null;
+  energy: string | null;
+  general_concern: string | null;
+  notes: string | null;
+  transcript: string | null;
+  audio_duration_seconds: number | null;
+  ai_generated: boolean;
+  provider: string | null;
+  model: string | null;
+  model_version: string | null;
+  confidence: number | null;
+  extraction: unknown | null;
+  human_verified: boolean;
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaregiverReportList {
+  items: CaregiverReport[];
+  total: number;
+}
+
+export interface VoiceTranscriptOut {
+  report_id: string;
+  patient_id: string;
+  transcript: string;
+  language: string | null;
+  service: string;
+}
+
+export interface AISummary {
+  provider: string;
+  model: string | null;
+  model_version: string | null;
+  confidence: number | null;
+}
+
+export interface ExtractedObservation {
+  type: ObservationType;
+  value: string | null;
+  unit: string | null;
+  confidence: number | null;
+  note: string | null;
+}
+
+export interface ExtractionOut {
+  report: CaregiverReport;
+  observations: ExtractedObservation[];
+  not_mentioned: ObservationType[];
+  ai: AISummary;
+}
+
+export interface ObservationConfirmPayload {
+  report_id: string;
+  reported_at?: string | null;
+  observations: {
+    type: ObservationType;
+    value?: string | null;
+    unit?: string | null;
+    notes?: string | null;
+    confidence?: number | null;
+  }[];
+}
+
+export interface ObservationConfirmOut {
+  report: CaregiverReport;
+  observations: Observation[];
+}
+
+export interface ChangeItem {
+  type: string;
+  current_value: string | null;
+  current_unit: string | null;
+  current_observed_at: string | null;
+  previous_value: string | null;
+  previous_unit: string | null;
+  previous_observed_at: string | null;
+  comparison: "increased" | "decreased" | "unchanged" | "changed" | "first";
+}
+
+export interface RecentChangesOut {
+  items: ChangeItem[];
+}
+
+export interface CarePlanUpdate {
+  status?: CarePlanStatus | null;
+  start_date?: string | null;
+  review_date?: string | null;
+  summary?: string | null;
+}
+
+export interface CareGoalCreate {
+  care_plan_id?: string | null;
+  title: string;
+  description?: string | null;
+  status?: CareGoalStatus | null;
+  priority?: CareGoalPriority | null;
+}
+
+export interface CareGoalUpdate {
+  title?: string | null;
+  description?: string | null;
+  status?: CareGoalStatus | null;
+  priority?: CareGoalPriority | null;
 }
 
 export interface UserSummary {

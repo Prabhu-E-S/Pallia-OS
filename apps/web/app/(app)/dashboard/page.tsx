@@ -25,7 +25,7 @@ function FailurePanel({ message }: { message: string }) {
 }
 
 export default function DashboardPage() {
-  const { session } = useAuth();
+  const { user } = useAuth();
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,7 +51,7 @@ export default function DashboardPage() {
   if (error) return <FailurePanel message={error} />;
   if (!data) return <PageLoader label="Loading overview…" />;
 
-  const org = session?.user?.organization_name;
+  const org = user?.organization_name;
 
   return (
     <div className="space-y-8">

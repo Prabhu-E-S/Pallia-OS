@@ -46,3 +46,8 @@ class PermissionDeniedError(AppError):
 class UnauthorizedError(AppError):
     def __init__(self, message: str = "Authentication required") -> None:
         super().__init__(message, code="UNAUTHORIZED", status_code=401)
+
+
+class TooManyRequestsError(AppError):
+    def __init__(self, message: str = "Too many requests, try again later") -> None:
+        super().__init__(message, code="RATE_LIMITED", status_code=429)

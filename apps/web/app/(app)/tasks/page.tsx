@@ -13,6 +13,7 @@ import type {
   CareTaskType,
   PatientSummary,
 } from "@/lib/api/types";
+import { useAuth } from "@/components/providers/auth-provider";
 import { PageHeader } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
@@ -44,6 +45,7 @@ const TYPES: CareTaskType[] = [
 
 export default function TasksPage() {
   const router = useRouter();
+  const { canAccess } = useAuth();
   const [items, setItems] = useState<CareTask[]>([]);
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,10 +107,12 @@ export default function TasksPage() {
         title="Tasks"
         description="Open work across the care team"
         actions={
-          <Button onClick={() => setShowForm((value) => !value)}>
-            <Plus className="h-4 w-4" aria-hidden />
-            New task
-          </Button>
+          canAccess("care_task.create") ? (
+            <Button onClick={() => setShowForm((value) => !value)}>
+              <Plus className="h-4 w-4" aria-hidden />
+              New task
+            </Button>
+          ) : undefined
         }
       />
 

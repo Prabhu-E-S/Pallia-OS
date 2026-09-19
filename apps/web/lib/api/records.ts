@@ -100,8 +100,9 @@ export function observationsApi() {
 
 export function timelineApi() {
   return {
-    forPatient(patientId: string): Promise<TimelineResponse> {
-      return apiFetch<TimelineResponse>(`/api/v1/patients/${patientId}/timeline`);
+    forPatient(patientId: string, kind?: string): Promise<TimelineResponse> {
+      const query = kind && kind !== "all" ? `?kind=${encodeURIComponent(kind)}` : "";
+      return apiFetch<TimelineResponse>(`/api/v1/patients/${patientId}/timeline${query}`);
     },
   };
 }

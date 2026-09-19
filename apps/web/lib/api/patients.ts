@@ -1,5 +1,10 @@
 import { apiFetch } from "@/lib/api/client";
 import type {
+  CareGoal,
+  CareGoalCreate,
+  CareGoalUpdate,
+  CarePlan,
+  CarePlanUpdate,
   DashboardSummary,
   PatientCreate,
   PatientDetail,
@@ -32,6 +37,27 @@ export function patientsApi() {
 
     update(patientId: string, payload: PatientUpdate): Promise<PatientDetail> {
       return apiFetch<PatientDetail>(`/api/v1/patients/${patientId}`, {
+        method: "PATCH",
+        body: payload,
+      });
+    },
+
+    updateCarePlan(patientId: string, payload: CarePlanUpdate): Promise<CarePlan> {
+      return apiFetch<CarePlan>(`/api/v1/patients/${patientId}/care-plan`, {
+        method: "PUT",
+        body: payload,
+      });
+    },
+
+    createCareGoal(patientId: string, payload: CareGoalCreate): Promise<CareGoal> {
+      return apiFetch<CareGoal>(`/api/v1/patients/${patientId}/care-plan/goals`, {
+        method: "POST",
+        body: payload,
+      });
+    },
+
+    updateCareGoal(patientId: string, goalId: string, payload: CareGoalUpdate): Promise<CareGoal> {
+      return apiFetch<CareGoal>(`/api/v1/patients/${patientId}/care-plan/goals/${goalId}`, {
         method: "PATCH",
         body: payload,
       });

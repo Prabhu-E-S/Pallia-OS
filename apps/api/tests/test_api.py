@@ -82,7 +82,9 @@ def test_organization_isolation(client, beta_headers, tenants):
 
     response = client.get("/api/v1/patients", headers=beta_headers)
     assert response.status_code == 200
-    assert response.json()["total"] == 0
+    ids = {item["id"] for item in response.json()["items"]}
+    assert patient_id not in ids
+    assert tenants["patient_b"]["id"] in ids
 
 
 def test_cross_tenant_observation_isolation(client, beta_headers, tenants):

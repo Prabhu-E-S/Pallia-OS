@@ -9,6 +9,7 @@ from app.core.security import require_permission
 from app.models import Observation, User
 from app.schemas.observation import ObservationCreate, ObservationList, ObservationOut
 from app.services import observations as obs_service
+from app.services.authorization import scoped_patient_ids, where_patient_scope
 
 router = APIRouter(prefix="/observations", tags=["observations"])
 
@@ -34,6 +35,7 @@ def list_observations(
         .order_by(Observation.observed_at.desc())
         .limit(200)
     )
+    stmt = where_patient_scope(stmt, Observation.patient_id, scoped_patient_ids(db, actor))
     observations = list(db.scalars(stmt))
     items = [obs_service.to_schema(o) for o in observations]
     return ObservationList(items=items, total=len(items))

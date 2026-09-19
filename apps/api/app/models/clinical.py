@@ -8,8 +8,10 @@ from datetime import datetime
 from typing import Annotated
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     String,
     Text,
@@ -64,7 +66,18 @@ class Observation(OrganizationScopedMixin, TimestampMixin):
         default=ObservationSource.MANUAL,
     )
 
+    # Provenance (Phase 3): where the value came from and whether an AI model
+    # proposed it. ``human_verified`` records explicit human confirmation.
+    source_reference: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("caregiver_reports.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    ai_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    human_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     patient: Mapped["Patient"] = relationship(back_populates="observations")
+    caregiver_report: Mapped["CaregiverReport | None"] = relationship(back_populates="observations")
 
 
 class MedicationPlan(OrganizationScopedMixin, TimestampMixin):

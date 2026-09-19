@@ -26,6 +26,11 @@ class ObservationOut(ORMModel):
     notes: str | None
     observed_at: datetime
     source: str
+    source_reference: str | None
+    ai_generated: bool
+    human_verified: bool
+    confidence: float | None
+    model_version: str | None
     created_at: datetime
 
 

@@ -34,6 +34,7 @@ class UserStatus(StrEnum):
     INVITED = "INVITED"
     INACTIVE = "INACTIVE"
     LOCKED = "LOCKED"
+    SUSPENDED = "SUSPENDED"
 
 
 class PatientStatus(StrEnum):
@@ -93,8 +94,27 @@ class ObservationType(StrEnum):
 class ObservationSource(StrEnum):
     MANUAL = "MANUAL"
     CAREGIVER_APP = "CAREGIVER_APP"
+    CAREGIVER_TEXT = "CAREGIVER_TEXT"
+    CAREGIVER_VOICE = "CAREGIVER_VOICE"
     PHONE = "PHONE"
     OTHER = "OTHER"
+
+
+class CaregiverReportMode(StrEnum):
+    """How a caregiver report was captured."""
+
+    QUICK_STATUS = "QUICK_STATUS"
+    STRUCTURED = "STRUCTURED"
+    TEXT = "TEXT"
+    VOICE = "VOICE"
+
+
+class CaregiverReportStatus(StrEnum):
+    DRAFT = "DRAFT"
+    PROCESSING = "PROCESSING"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    CONFIRMED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
 
 
 class MedicationPlanStatus(StrEnum):

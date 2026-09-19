@@ -30,6 +30,25 @@ class Settings(BaseSettings):
     # Empty means "any email" (development only).
     dev_login_allowed_emails: str = ""
 
+    # Login rate limiting (in-memory; see app/core/rate_limit.py).
+    login_max_attempts: int = 10
+    login_rate_window_seconds: int = 900
+
+    # Speech-to-text provider. "local" is a development-only service that reads
+    # UTF-8 text from the uploaded payload; "openai" uses OpenAI Whisper.
+    speech_provider: str = "local"
+
+    # Structured-extraction provider. "local" is a deterministic, rule-based
+    # extractor that works without network access; "openai" uses an LLM.
+    ai_provider: str = "local"
+    openai_api_key: str = ""
+    openai_speech_model: str = "whisper-1"
+    openai_extraction_model: str = "gpt-4o-mini"
+
+    # Version of the extraction prompt; bumped whenever the schema/safety rules
+    # change so stored extractions stay attributable.
+    extraction_prompt_version: str = "v1"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_csv(cls, value) -> list[str]:

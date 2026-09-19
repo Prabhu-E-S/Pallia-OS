@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import Gender, PatientStatus
+from app.models.enums import CareGoalPriority, CareGoalStatus, CarePlanStatus, Gender, PatientStatus
 from app.schemas.common import ORMModel
 
 
@@ -72,6 +72,13 @@ class CarePlanOut(ORMModel):
     updated_at: datetime
 
 
+class CarePlanUpdate(BaseModel):
+    status: CarePlanStatus | None = None
+    start_date: date | None = None
+    review_date: date | None = None
+    summary: str | None = Field(default=None, max_length=4000)
+
+
 class CareGoalOut(ORMModel):
     id: str
     patient_id: str
@@ -82,6 +89,21 @@ class CareGoalOut(ORMModel):
     priority: str
     created_at: datetime
     updated_at: datetime
+
+
+class CareGoalCreate(BaseModel):
+    care_plan_id: str | None = None
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+    status: CareGoalStatus | None = None
+    priority: CareGoalPriority | None = None
+
+
+class CareGoalUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+    status: CareGoalStatus | None = None
+    priority: CareGoalPriority | None = None
 
 
 class PatientDetail(PatientSummary):

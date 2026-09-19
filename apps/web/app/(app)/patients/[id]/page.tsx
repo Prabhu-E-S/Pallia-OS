@@ -4,12 +4,17 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Plus } from "lucide-react";
 import { patientsApi } from "@/lib/api/patients";
+import { reportsApi } from "@/lib/api/reports";
 import { observationsApi, tasksApi, timelineApi, visitsApi } from "@/lib/api/records";
 import { ApiErrorResponse } from "@/lib/api/client";
 import type {
   CareGoal,
+  CareGoalPriority,
+  CareGoalStatus,
+  CarePlanStatus,
   CareTask,
   CareTeamMember,
+  ChangeItem,
   Observation,
   ObservationCreate,
   PatientDetail,
@@ -22,10 +27,12 @@ import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Tabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { EmptyState, PageLoader } from "@/components/ui/feedback";
+import { useAuth } from "@/components/providers/auth-provider";
 import {
   activityLabel,
+  COMPARISON_LABELS,
   GENDER_LABELS,
   OBSERVATION_LABELS,
   RELATIONSHIP_LABELS,
@@ -58,6 +65,7 @@ export default function PatientDetailPage() {
   const [visits, setVisits] = useState<Visit[]>([]);
   const [tasks, setTasks] = useState<CareTask[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [timelineKind, setTimelineKind] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
@@ -70,7 +78,7 @@ export default function PatientDetailPage() {
       observationsApi().forPatient(patientId),
       visitsApi().forPatient(patientId),
       tasksApi().forPatient(patientId),
-      timelineApi().forPatient(patientId),
+      timelineApi().forPatient(patientId, timelineKind === "all" ? undefined : timelineKind),
     ])
       .then(([detail, obs, vis, ts, tl]) => {
         if (cancelled) return;
@@ -91,7 +99,7 @@ export default function PatientDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [patientId, reloadToken]);
+  }, [patientId, timelineKind, reloadToken]);
 
   if (loading) return <PageLoader label="Loading patient…" />;
   if (error || !patient) {
@@ -149,7 +157,11 @@ export default function PatientDetailPage() {
 
       <div className="pt-2">
         {tab === "overview" && (
-          <OverviewPanel patient={patient} onRefresh={() => setReloadToken((value) => value + 1)} />
+          <OverviewPanel
+            key={patient.id}
+            patient={patient}
+            onRefresh={() => setReloadToken((value) => value + 1)}
+          />
         )}
         {tab === "observations" && (
           <ObservationsPanel
@@ -160,7 +172,9 @@ export default function PatientDetailPage() {
         )}
         {tab === "visits" && <VisitsPanel visits={visits} onRefresh={() => setReloadToken((value) => value + 1)} />}
         {tab === "tasks" && <TasksPanel tasks={tasks} onRefresh={() => setReloadToken((value) => value + 1)} />}
-        {tab === "timeline" && <TimelinePanel items={timeline} />}
+        {tab === "timeline" && (
+          <TimelinePanel items={timeline} kind={timelineKind} onKindChange={setTimelineKind} />
+        )}
       </div>
     </div>
   );
@@ -173,8 +187,77 @@ function OverviewPanel({
   patient: PatientDetail;
   onRefresh: () => void;
 }) {
+  const { canAccess } = useAuth();
+  const [planEditing, setPlanEditing] = useState(false);
+  const [planStatus, setPlanStatus] = useState<CarePlanStatus | null>(null);
+  const [planSummary, setPlanSummary] = useState("");
+  const [goalAdding, setGoalAdding] = useState(false);
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalDescription, setGoalDescription] = useState("");
+  const [goalPriority, setGoalPriority] = useState<CareGoalPriority>("NORMAL");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function openPlanEditing() {
+    setPlanStatus(patient.care_plan?.status ?? null);
+    setPlanSummary(patient.care_plan?.summary ?? "");
+    setPlanEditing(true);
+  }
+
+  async function savePlan(event: React.FormEvent) {
+    event.preventDefault();
+    if (!patient.care_plan) return;
+    setSaving(true);
+    setFormError(null);
+    try {
+      await patientsApi().updateCarePlan(patient.id, {
+        status: planStatus ?? undefined,
+        summary: planSummary.trim() || null,
+      });
+      setPlanEditing(false);
+      onRefresh();
+    } catch (err) {
+      setFormError(err instanceof ApiErrorResponse ? err.message : "Unable to save the care plan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveGoal(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setFormError(null);
+    try {
+      await patientsApi().createCareGoal(patient.id, {
+        title: goalTitle.trim(),
+        description: goalDescription.trim() || null,
+        priority: goalPriority,
+      });
+      setGoalTitle("");
+      setGoalDescription("");
+      setGoalAdding(false);
+      onRefresh();
+    } catch (err) {
+      setFormError(err instanceof ApiErrorResponse ? err.message : "Unable to add the goal.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateGoalStatus(goalId: string, status: CareGoalStatus) {
+    setFormError(null);
+    try {
+      await patientsApi().updateCareGoal(patient.id, goalId, { status });
+      onRefresh();
+    } catch (err) {
+      setFormError(err instanceof ApiErrorResponse ? err.message : "Unable to update the goal.");
+    }
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
+      <RecentChangesCard patientId={patient.id} />
+
       <Card className="lg:col-span-2">
         <CardHeader title="About" description="Contact and address details" />
         <CardBody className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
@@ -221,38 +304,136 @@ function OverviewPanel({
         </CardBody>
       </Card>
 
+      {planEditing ? (
+        <Card className="lg:col-span-2">
+          <CardHeader title="Edit care plan" />
+          <CardBody className="pt-0">
+            <form onSubmit={savePlan} className="space-y-4">
+              <Field label="Status">
+                <Select
+                  value={planStatus ?? "ACTIVE"}
+                  onChange={(event) => setPlanStatus(event.target.value as CarePlanStatus)}
+                >
+                  {CARE_PLAN_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {status.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Summary">
+                <Textarea value={planSummary} onChange={(event) => setPlanSummary(event.target.value)} />
+              </Field>
+              {formError ? (
+                <p className="text-sm text-rose-700" role="alert">{formError}</p>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save plan"}</Button>
+                <Button variant="ghost" type="button" onClick={() => setPlanEditing(false)}>Cancel</Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      ) : (
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Care plan"
+            action={
+              patient.care_plan && canAccess("care_plan.update") ? (
+                <Button size="sm" variant="ghost" onClick={openPlanEditing}>
+                  Edit
+                </Button>
+              ) : undefined
+            }
+          />
+          <CardBody className="pt-0">
+            {patient.care_plan ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <StatusBadge value={patient.care_plan.status} />
+                  <p className="text-xs text-muted">
+                    Started {formatDate(patient.care_plan.start_date)} · review{" "}
+                    {formatDate(patient.care_plan.review_date)}
+                  </p>
+                </div>
+                <p className="text-sm text-slate-700">{patient.care_plan.summary ?? "No summary."}</p>
+              </div>
+            ) : (
+              <EmptyState
+                title="No care plan yet"
+                description="A care plan has not been created for this patient."
+              />
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
         <CardHeader
-          title="Care plan"
+          title="Goals"
           action={
-            patient.care_plan ? (
-              <StatusBadge value={patient.care_plan.status} />
+            canAccess("care_goal.create") ? (
+              <Button size="sm" variant="ghost" onClick={() => setGoalAdding((value) => !value)}>
+                Add goal
+              </Button>
             ) : undefined
           }
         />
         <CardBody className="pt-0">
-          {patient.care_plan ? (
-            <div className="space-y-2">
-              <p className="text-sm text-slate-700">{patient.care_plan.summary ?? "No summary."}</p>
-              <p className="text-xs text-muted">
-                Started {formatDate(patient.care_plan.start_date)} · review{" "}
-                {formatDate(patient.care_plan.review_date)}
-              </p>
-              <div className="pt-2">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Goals</p>
-                {patient.care_goals.length === 0 ? (
-                  <p className="text-sm text-muted">No goals recorded.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {patient.care_goals.map((goal) => (
-                      <GoalRow key={goal.id} goal={goal} />
-                    ))}
-                  </ul>
-                )}
+          {goalAdding ? (
+            <form onSubmit={saveGoal} className="space-y-3 border-b border-line pb-4">
+              <Field label="Title">
+                <Input
+                  value={goalTitle}
+                  onChange={(event) => setGoalTitle(event.target.value)}
+                  placeholder="e.g. Comfortable nights"
+                />
+              </Field>
+              <Field label="Description">
+                <Input
+                  value={goalDescription}
+                  onChange={(event) => setGoalDescription(event.target.value)}
+                  placeholder="Optional"
+                />
+              </Field>
+              <Field label="Priority">
+                <Select
+                  value={goalPriority}
+                  onChange={(event) => setGoalPriority(event.target.value as CareGoalPriority)}
+                >
+                  {CARE_GOAL_PRIORITIES.map((priority) => (
+                    <option key={priority} value={priority}>
+                      {priority.charAt(0) + priority.slice(1).toLowerCase()}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {formError ? (
+                <p className="text-sm text-rose-700" role="alert">{formError}</p>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <Button type="submit" size="sm" disabled={saving || !goalTitle.trim()}>
+                  {saving ? "Adding…" : "Add goal"}
+                </Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => setGoalAdding(false)}>
+                  Cancel
+                </Button>
               </div>
-            </div>
+            </form>
+          ) : null}
+          {patient.care_goals.length === 0 ? (
+            <p className="pt-3 text-sm text-muted">No goals recorded.</p>
           ) : (
-            <EmptyState title="No care plan yet" description="A care plan has not been created for this patient." />
+            <ul className="space-y-2 pt-3">
+              {patient.care_goals.map((goal) => (
+                <GoalRow
+                  key={goal.id}
+                  goal={goal}
+                  canEditStatus={canAccess("care_goal.update")}
+                  onStatusChange={updateGoalStatus}
+                />
+              ))}
+            </ul>
           )}
         </CardBody>
       </Card>
@@ -266,6 +447,95 @@ function OverviewPanel({
       </Card>
     </div>
   );
+}
+
+const CARE_PLAN_STATUSES = ["DRAFT", "ACTIVE", "ON_HOLD", "COMPLETED", "ARCHIVED"] as const;
+const CARE_GOAL_PRIORITIES = ["LOW", "NORMAL", "HIGH"] as const;
+const CARE_GOAL_STATUSES = ["OPEN", "IN_PROGRESS", "ACHIEVED", "DROPPED"] as const;
+
+function RecentChangesCard({ patientId }: { patientId: string }) {
+  const [items, setItems] = useState<ChangeItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    reportsApi()
+      .recentChanges(patientId)
+      .then((result) => {
+        if (!cancelled) setItems(result.items);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiErrorResponse ? err.message : "Unable to load changes.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
+
+  return (
+    <Card className="lg:col-span-3">
+      <CardHeader
+        title="Recent changes"
+        description="How the latest recorded values compare to the previous entry."
+      />
+      <CardBody className="pt-0">
+        {error ? (
+          <p className="text-sm text-rose-700">{error}</p>
+        ) : items === null ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-muted">No recorded observations yet.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {items.map((item, index) => (
+              <li key={`${item.type}-${index}`} className="flex items-center justify-between gap-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800">
+                    {OBSERVATION_LABELS[item.type] ?? item.type}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {item.previous_observed_at
+                      ? `Previous ${formatDateTime(item.previous_observed_at)}`
+                      : "First recorded"}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {item.previous_value ? (
+                    <span className="text-xs text-muted line-through">
+                      {item.previous_value}
+                      {item.previous_unit ? ` ${item.previous_unit}` : ""}
+                    </span>
+                  ) : null}
+                  <span className="text-sm font-medium text-slate-900">
+                    {item.current_value}
+                    {item.current_unit ? ` ${item.current_unit}` : ""}
+                  </span>
+                  <Badge tone={comparisonTone(item.comparison)}>
+                    {COMPARISON_LABELS[item.comparison] ?? item.comparison}
+                  </Badge>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function comparisonTone(comparison: string): "neutral" | "teal" | "amber" | "sky" | "violet" {
+  switch (comparison) {
+    case "increased":
+      return "amber";
+    case "decreased":
+      return "sky";
+    case "changed":
+      return "violet";
+    case "first":
+      return "teal";
+    default:
+      return "neutral";
+  }
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
@@ -294,7 +564,15 @@ function CareTeamRow({ member }: { member: CareTeamMember }) {
   );
 }
 
-function GoalRow({ goal }: { goal: CareGoal }) {
+function GoalRow({
+  goal,
+  canEditStatus,
+  onStatusChange,
+}: {
+  goal: CareGoal;
+  canEditStatus: boolean;
+  onStatusChange: (goalId: string, status: CareGoalStatus) => void;
+}) {
   return (
     <li className="rounded-md border border-line px-3 py-2">
       <div className="flex items-start justify-between gap-3">
@@ -304,7 +582,22 @@ function GoalRow({ goal }: { goal: CareGoal }) {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <PriorityBadge value={goal.priority} />
-          <StatusBadge value={goal.status} />
+          {canEditStatus ? (
+            <Select
+              value={goal.status}
+              onChange={(event) => onStatusChange(goal.id, event.target.value as CareGoalStatus)}
+              className="w-auto py-1 text-xs"
+              aria-label={`Status for ${goal.title}`}
+            >
+              {CARE_GOAL_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status.replaceAll("_", " ")}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <StatusBadge value={goal.status} />
+          )}
         </div>
       </div>
     </li>
@@ -320,6 +613,7 @@ function ObservationsPanel({
   patientId: string;
   onRecorded: () => void;
 }) {
+  const { canAccess } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<ObservationCreate["type"]>("PAIN");
   const [value, setValue] = useState("");
@@ -358,10 +652,12 @@ function ObservationsPanel({
         title="Observations"
         description="Clinical and daily observations"
         action={
-          <Button size="sm" onClick={() => setShowForm((value) => !value)}>
-            <Plus className="h-4 w-4" aria-hidden />
-            Record
-          </Button>
+          canAccess("observation.create") ? (
+            <Button size="sm" onClick={() => setShowForm((value) => !value)}>
+              <Plus className="h-4 w-4" aria-hidden />
+              Record
+            </Button>
+          ) : undefined
         }
       />
 
@@ -426,9 +722,13 @@ function ObservationsPanel({
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-xs text-muted">{formatDateTime(observation.observed_at)}</p>
-                  {observation.source ? (
-                    <p className="text-xs text-muted">{SOURCE_LABELS[observation.source] ?? observation.source}</p>
-                  ) : null}
+                  <div className="mt-1 flex items-center justify-end gap-1">
+                    {observation.ai_generated ? <Badge tone="violet">AI-assisted</Badge> : null}
+                    {observation.human_verified ? <Badge tone="emerald">Verified</Badge> : null}
+                    {observation.source ? (
+                      <Badge tone="neutral">{SOURCE_LABELS[observation.source] ?? observation.source}</Badge>
+                    ) : null}
+                  </div>
                 </div>
               </li>
             ))}
@@ -521,9 +821,27 @@ const KIND_DOT: Record<string, string> = {
   visit: "bg-brand-500",
   task: "bg-sky-400",
   communication: "bg-violet-400",
+  caregiver_report: "bg-teal-400",
 };
 
-function TimelinePanel({ items }: { items: TimelineItem[] }) {
+const TIMELINE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "observations", label: "Observations" },
+  { key: "visits", label: "Visits" },
+  { key: "tasks", label: "Tasks" },
+  { key: "communications", label: "Communications" },
+  { key: "caregiver_updates", label: "Caregiver updates" },
+];
+
+function TimelinePanel({
+  items,
+  kind,
+  onKindChange,
+}: {
+  items: TimelineItem[];
+  kind: string;
+  onKindChange: (kind: string) => void;
+}) {
   if (items.length === 0) {
     return (
       <Card>
@@ -535,7 +853,25 @@ function TimelinePanel({ items }: { items: TimelineItem[] }) {
   }
   return (
     <Card>
-      <CardBody className="pt-6">
+      <CardBody className="pt-4">
+        <div className="mb-4 flex flex-wrap gap-1.5 overflow-x-auto">
+          {TIMELINE_FILTERS.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => onKindChange(filter.key)}
+              aria-pressed={kind === filter.key}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                kind === filter.key
+                  ? "border-brand-200 bg-brand-50 text-brand-800"
+                  : "border-line bg-white text-slate-600 hover:bg-slate-50",
+              )}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
         <ol className="space-y-0">
           {items.map((item, index) => (
             <li key={item.id} className="relative flex gap-4 pb-6">

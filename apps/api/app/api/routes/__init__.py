@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     auth,
+    caregiver,
     dashboard,
     health,
     observations,
@@ -20,6 +21,7 @@ api_router.include_router(organizations.router)
 api_router.include_router(users.router)
 api_router.include_router(patients.router)
 api_router.include_router(observations.router)
+api_router.include_router(caregiver.router)
 api_router.include_router(visits.router)
 api_router.include_router(tasks.router)
 api_router.include_router(dashboard.router)

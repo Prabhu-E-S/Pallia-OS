@@ -6,6 +6,7 @@ from app.models import Patient, User, Visit
 from app.schemas.visit import VisitCreate, VisitOut, VisitUpdate
 from app.services import audit
 from app.services import users as user_services
+from app.services.authorization import scoped_patient_ids, where_patient_scope
 from app.services.patients import get_patient
 
 
@@ -91,6 +92,7 @@ def list_organization(db: Session, actor: User) -> list[VisitOut]:
         .order_by(Visit.scheduled_at.desc())
         .limit(200)
     )
+    stmt = where_patient_scope(stmt, Visit.patient_id, scoped_patient_ids(db, actor))
     return [_visit_out(db, v) for v in db.scalars(stmt)]
 
 
@@ -105,5 +107,8 @@ def get_visit_in_org(db: Session, actor: User, visit_id: str) -> Visit:
         select(Visit).where(Visit.id == uid, Visit.organization_id == actor.organization_id)
     )
     if visit is None:
+        raise NotFoundError("Visit not found")
+    allowed = scoped_patient_ids(db, actor)
+    if allowed is not None and visit.patient_id not in allowed:
         raise NotFoundError("Visit not found")
     return visit

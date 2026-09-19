@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ClipboardList,
+  HeartHandshake,
   HeartPulse,
   LayoutDashboard,
   LogOut,
@@ -15,18 +16,27 @@ import { ROLE_LABELS } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
-const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/patients", label: "Patients", icon: Users },
-  { href: "/visits", label: "Visits", icon: ClipboardList },
-  { href: "/tasks", label: "Tasks", icon: HeartPulse },
-  { href: "/settings", label: "Settings", icon: Settings },
+const ALL_NAV = [
+  { href: "/care", label: "Care", icon: HeartHandshake, permission: "caregiver_report.read" },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permission: null },
+  { href: "/patients", label: "Patients", icon: Users, permission: "patient.read" },
+  { href: "/visits", label: "Visits", icon: ClipboardList, permission: "visit.read" },
+  { href: "/tasks", label: "Tasks", icon: HeartPulse, permission: "care_task.read" },
+  { href: "/settings", label: "Settings", icon: Settings, permission: null },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { session, logout } = useAuth();
-  const user = session?.user;
+  const { user, logout, canAccess } = useAuth();
+
+  const nav = ALL_NAV.filter(
+    (item) => item.permission === null || canAccess(item.permission),
+  ).filter((item) => {
+    // The Care workspace is for caregivers and the team; keep employees on
+    // their normal workspace pages once they have their own.
+    if (item.href === "/care") return user?.role === "CAREGIVER";
+    return true;
+  });
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface md:flex">
@@ -40,7 +50,7 @@ export function Sidebar() {
       </Link>
 
       <nav className="mt-2 flex-1 space-y-0.5 px-3">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const active =
             item.href === "/dashboard"
               ? pathname === "/dashboard"
@@ -77,7 +87,7 @@ export function Sidebar() {
             </p>
           </div>
           <button
-            onClick={logout}
+            onClick={() => void logout()}
             className="rounded-md p-1.5 text-muted hover:bg-slate-100 hover:text-slate-700"
             title="Sign out"
             aria-label="Sign out"

@@ -3,9 +3,10 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.errors import NotFoundError
+from app.core.errors import AppError, NotFoundError
 from app.models import (
     Caregiver,
+    CareGoal,
     CarePlan,
     CareTeam,
     Patient,
@@ -22,6 +23,7 @@ from app.schemas.patient import (
     PatientUpdate,
 )
 from app.services import audit
+from app.services.authorization import ensure_patient_access, scoped_patient_ids
 
 _scalar_fields = {
     "full_name",
@@ -34,6 +36,10 @@ _scalar_fields = {
     "emergency_contact_phone",
     "status",
 }
+
+_PLAN_FIELDS = {"status", "summary", "start_date", "review_date"}
+
+_GOAL_FIELDS = {"title", "description", "status", "priority"}
 
 
 def get_patient(db: Session, actor: User, patient_id: str) -> Patient:
@@ -49,7 +55,7 @@ def get_patient(db: Session, actor: User, patient_id: str) -> Patient:
     )
     if patient is None:
         raise NotFoundError("Patient not found")
-    return patient
+    return ensure_patient_access(db, actor, patient)
 
 
 def list_patients(db: Session, actor: User) -> list[Patient]:
@@ -59,6 +65,9 @@ def list_patients(db: Session, actor: User) -> list[Patient]:
         .order_by(Patient.created_at.desc())
         .limit(200)
     )
+    allowed = scoped_patient_ids(db, actor)
+    if allowed is not None:
+        stmt = stmt.where(Patient.id.in_(allowed))
     return list(db.scalars(stmt))
 
 
@@ -197,3 +206,112 @@ def build_detail(
         care_plan=CarePlanOut.model_validate(care_plan) if care_plan else None,
         care_goals=care_goals,
     )
+
+
+def latest_care_plan(db: Session, actor: User, patient: Patient) -> CarePlan | None:
+    return _care_plan(db, patient.id, actor.organization_id)
+
+
+def update_care_plan(db: Session, actor: User, patient: Patient, payload) -> CarePlan:
+    plan = latest_care_plan(db, actor, patient)
+    if plan is None:
+        raise AppError(
+            "This patient has no care plan yet.", code="VALIDATION_ERROR", status_code=422
+        )
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        if field in _PLAN_FIELDS and value is not None:
+            setattr(plan, field, value)
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    audit.record(
+        db,
+        organization_id=plan.organization_id,
+        actor_id=actor.id,
+        action="care_plan.updated",
+        entity_type="care_plan",
+        entity_id=plan.id,
+        metadata={"patient_id": str(patient.id), "fields": sorted(data.keys())},
+    )
+    return plan
+
+
+def create_care_goal(db: Session, actor: User, patient: Patient, payload) -> CareGoal:
+    plan: CarePlan | None = None
+    if payload.care_plan_id:
+        try:
+            plan_uid = uuid.UUID(payload.care_plan_id)
+        except (ValueError, TypeError):
+            plan_uid = None
+        if plan_uid:
+            plan = db.scalar(
+                select(CarePlan).where(
+                    CarePlan.id == plan_uid,
+                    CarePlan.patient_id == patient.id,
+                    CarePlan.organization_id == actor.organization_id,
+                )
+            )
+        if plan is None:
+            raise NotFoundError("Care plan not found")
+    else:
+        plan = latest_care_plan(db, actor, patient)
+    if plan is None:
+        raise AppError(
+            "Create a care plan before adding goals.", code="VALIDATION_ERROR", status_code=422
+        )
+
+    from app.models.enums import CareGoalPriority, CareGoalStatus
+
+    goal_kwargs: dict = {
+        "patient_id": patient.id,
+        "care_plan_id": plan.id,
+        "title": payload.title,
+        "description": payload.description,
+        "status": payload.status or CareGoalStatus.OPEN,
+    }
+    if payload.priority is not None:
+        goal_kwargs["priority"] = payload.priority
+    elif "priority" in payload.model_fields_set and payload.priority is None:
+        goal_kwargs["priority"] = CareGoalPriority.NORMAL
+    goal = CareGoal(**goal_kwargs)
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+    audit.record(
+        db,
+        organization_id=actor.organization_id,
+        actor_id=actor.id,
+        action="care_goal.created",
+        entity_type="care_goal",
+        entity_id=goal.id,
+        metadata={"patient_id": str(patient.id), "title": goal.title},
+    )
+    return goal
+
+
+def update_care_goal(db: Session, actor: User, patient: Patient, goal_id: str, payload) -> CareGoal:
+    try:
+        uid = uuid.UUID(goal_id)
+    except (ValueError, TypeError) as exc:
+        raise NotFoundError("Care goal not found") from exc
+    goal = db.scalar(select(CareGoal).where(CareGoal.id == uid, CareGoal.patient_id == patient.id))
+    if goal is None:
+        raise NotFoundError("Care goal not found")
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        if field in _GOAL_FIELDS and value is not None:
+            setattr(goal, field, value)
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+    audit.record(
+        db,
+        organization_id=actor.organization_id,
+        actor_id=actor.id,
+        action="care_goal.updated",
+        entity_type="care_goal",
+        entity_id=goal.id,
+        metadata={"patient_id": str(goal.patient_id), "fields": sorted(data.keys())},
+    )
+    return goal

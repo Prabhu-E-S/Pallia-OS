@@ -1,4 +1,10 @@
-from app.schemas.auth import CurrentUserOut, DevLoginRequest, TokenResponse
+from app.schemas.auth import (
+    CurrentUserOut,
+    DevLoginRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    TokenResponse,
+)
 from app.schemas.common import (
     ApiError,
     AuditActionOut,
@@ -38,6 +44,7 @@ __all__ = [
     "DevLoginRequest",
     "ErrorEnvelope",
     "HealthOut",
+    "LoginRequest",
     "ObservationCreate",
     "ObservationList",
     "ObservationOut",
@@ -51,6 +58,7 @@ __all__ = [
     "PatientRef",
     "PatientSummary",
     "PatientUpdate",
+    "RefreshTokenRequest",
     "TokenResponse",
     "UserList",
     "UserOut",

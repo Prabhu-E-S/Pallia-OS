@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  ClipboardList,
+  HeartHandshake,
   HeartPulse,
   LayoutDashboard,
   LogOut,
@@ -12,18 +14,27 @@ import {
 import { useAuth } from "@/components/providers/auth-provider";
 import { cn } from "@/lib/cn";
 
-const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/patients", label: "Patients", icon: Users },
-  { href: "/tasks", label: "Tasks", icon: HeartPulse },
-  { href: "/settings", label: "Settings", icon: Settings },
+const ALL_NAV = [
+  { href: "/care", label: "Care", icon: HeartHandshake, permission: "caregiver_report.read" },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permission: null },
+  { href: "/patients", label: "Patients", icon: Users, permission: "patient.read" },
+  { href: "/visits", label: "Visits", icon: ClipboardList, permission: "visit.read" },
+  { href: "/tasks", label: "Tasks", icon: HeartPulse, permission: "care_task.read" },
+  { href: "/settings", label: "Settings", icon: Settings, permission: null },
 ];
 
 /** Compact top bar shown on small screens, replacing the sidebar. */
 export function MobileNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const { logout } = useAuth();
+  const { user, logout, canAccess } = useAuth();
+
+  const nav = ALL_NAV.filter(
+    (item) => item.permission === null || canAccess(item.permission),
+  ).filter((item) => {
+    if (item.href === "/care") return user?.role === "CAREGIVER";
+    return true;
+  });
 
   return (
     <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
@@ -34,7 +45,7 @@ export function MobileNav() {
         <span className="text-sm font-semibold text-slate-900">Pallia OS</span>
       </Link>
       <nav className="flex items-center gap-1">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const active =
             item.href === "/dashboard"
               ? pathname === "/dashboard"
@@ -57,7 +68,7 @@ export function MobileNav() {
         })}
         <button
           onClick={() => {
-            logout();
+            void logout();
             router.push("/login");
           }}
           aria-label="Sign out"

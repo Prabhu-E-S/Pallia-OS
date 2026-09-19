@@ -1,20 +1,17 @@
 """Security foundation.
 
-Phase 1 uses a lightweight development authentication mechanism so the product
-can be built and tested. It is intentionally replaced later by proper OAuth2 /
-OIDC authentication. The placement of these functions is deliberately stable so
-that replacement happens in this module and nowhere else.
+Authentication model (Phase 2):
 
-What exists here:
-  * PBKDF2 password hashing helpers.
-  * A signed, expiring bearer token scheme built on the standard library.
-  * FastAPI dependencies that resolve the current user and enforce permissions.
+  * Passwords are hashed with Argon2id (``argon2-cffi``). Legacy PBKDF2-HMAC-
+    SHA256 hashes created in Phase 1 are still verified transparently.
+  * Access tokens are short-lived, signed bearer tokens carrying an optional
+    ``sid`` (session id reference). When ``sid`` is present the referenced
+    ``AuthSession`` must still be active - this enables immediate revocation.
+  * Refresh tokens are opaque random strings stored only as SHA-256 hashes in
+    ``auth_sessions``. They are rotated on every refresh and can be revoked.
 
-What does NOT exist yet:
-  * OAuth2 / OIDC flows.
-  * Refresh tokens.
-  * Session management.
-  * Two-factor authentication.
+The placement of these functions is deliberate so auth behaviour lives in this
+module and in ``app/api/routes/auth.py`` and nowhere else.
 """
 
 import base64
@@ -25,6 +22,7 @@ import os
 import secrets
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, Header
@@ -35,14 +33,37 @@ from app.core import permissions
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.errors import PermissionDeniedError, UnauthorizedError
-from app.models import User, UserStatus
+from app.models import AuthSession, User, UserStatus
+
+try:
+    from argon2 import PasswordHasher
+    from argon2.exceptions import InvalidHashError, VerificationError
+
+    _argon2 = PasswordHasher()
+except ImportError:  # pragma: no cover
+    _argon2 = None
 
 _ALGORITHM = "sha256"
-_TOKEN_TTL_SECONDS = 12 * 60 * 60  # 12 hours for the development session.
+_ACCESS_TOKEN_TTL_SECONDS = 30 * 60  # 30 minutes; short-lived by design.
+# Keep the old constant name/behaviour for anything relying on a 12h token.
+_TOKEN_TTL_SECONDS = _ACCESS_TOKEN_TTL_SECONDS
+ACCESS_TOKEN_TTL_SECONDS = _ACCESS_TOKEN_TTL_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# Password hashing
+# ---------------------------------------------------------------------------
 
 
 def hash_password(password: str) -> str:
-    """Hash a password with PBKDF2-HMAC-SHA256 and a per-user salt."""
+    """Hash a password with Argon2id and a per-user salt."""
+    if _argon2 is not None:
+        return _argon2.hash(password)
+    # Fallback keeps the module usable if argon2-cffi is unavailable.
+    return _hash_password_pbkdf2(password)
+
+
+def _hash_password_pbkdf2(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
     return (
@@ -51,8 +72,7 @@ def hash_password(password: str) -> str:
     )
 
 
-def verify_password(password: str, encoded: str) -> bool:
-    """Verify a password against a PBKDF2 hash produced by ``hash_password``."""
+def _verify_pbkdf2(password: str, encoded: str) -> bool:
     try:
         algorithm, iterations, salt_b64, digest_b64 = encoded.split("$")
         if algorithm != "pbkdf2_sha256":
@@ -65,17 +85,58 @@ def verify_password(password: str, encoded: str) -> bool:
         return False
 
 
+def verify_password(password: str, encoded: str) -> bool:
+    """Verify a password against an Argon2id or legacy PBKDF2 hash."""
+    if _argon2 is not None and encoded.startswith("$argon2"):
+        try:
+            return _argon2.verify(encoded, password)
+        except (VerificationError, InvalidHashError):
+            return False
+    return _verify_pbkdf2(password, encoded)
+
+
+# ---------------------------------------------------------------------------
+# Refresh token helpers
+# ---------------------------------------------------------------------------
+
+
+def generate_refresh_token() -> str:
+    """Create an opaque, high-entropy refresh token."""
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(token: str) -> str:
+    """Hash a refresh token so only the digest is persisted."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Access tokens
+# ---------------------------------------------------------------------------
+
+
 def _sign(secret: bytes, body: str) -> str:
     return hmac.new(secret, body.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def create_access_token(subject: str, ttl_seconds: int = _TOKEN_TTL_SECONDS) -> str:
-    """Create a signed bearer token for the given subject (user id)."""
+def create_access_token(
+    subject: str,
+    ttl_seconds: int = _ACCESS_TOKEN_TTL_SECONDS,
+    sid: str | None = None,
+) -> str:
+    """Create a signed bearer token for the given subject (user id).
+
+    ``sid`` optionally binds the token to an ``AuthSession`` id. Tokens without
+    a ``sid`` are accepted for backward compatibility (Phase 1) but do not
+    participate in session revocation.
+    """
     payload: dict[str, Any] = {
         "sub": subject,
         "exp": int(time.time()) + ttl_seconds,
         "iat": int(time.time()),
     }
+    if sid:
+        payload["sid"] = sid
     body = (
         base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
         .rstrip(b"=")
@@ -85,8 +146,11 @@ def create_access_token(subject: str, ttl_seconds: int = _TOKEN_TTL_SECONDS) -> 
     return f"{body}.{_sign(secret, body)}"
 
 
-def decode_access_token(token: str) -> str | None:
-    """Validate a token and return its subject (user id), or ``None``."""
+def decode_access_token(token: str) -> dict[str, Any] | None:
+    """Validate a token and return its payload (``sub``, ``sid``, ``exp``).
+
+    Returns ``None`` for invalid, tampered or expired tokens.
+    """
     try:
         body, signature = token.split(".")
         secret = get_settings().secret_key.encode("utf-8")
@@ -95,9 +159,36 @@ def decode_access_token(token: str) -> str | None:
         payload = json.loads(base64.urlsafe_b64decode(body + "==".ljust(len(body) % 4, "=")))
         if payload.get("exp", 0) < int(time.time()):
             return None
-        return str(payload.get("sub") or "")
+        if not payload.get("sub"):
+            return None
+        return payload
     except (ValueError, KeyError, json.JSONDecodeError):
         return None
+
+
+def _resolve_active_session(db: Session, sid: str, user: User) -> AuthSession | None:
+    """Look up a session by its referenced id and confirm it belongs to the user."""
+    try:
+        session_id = uuid.UUID(sid)
+    except (ValueError, TypeError):
+        return None
+    session = db.scalar(
+        select(AuthSession).where(
+            AuthSession.id == session_id,
+            AuthSession.user_id == user.id,
+            AuthSession.organization_id == user.organization_id,
+        )
+    )
+    if session is None or not session.is_active:
+        return None
+    now = datetime.now(UTC)
+    last_used = session.last_used_at
+    if last_used is not None and last_used.tzinfo is None:
+        last_used = last_used.replace(tzinfo=UTC)
+    if session.last_used_at is None or (now - last_used).total_seconds() > 300:
+        session.last_used_at = now
+        db.commit()
+    return session
 
 
 def get_current_user(
@@ -112,12 +203,13 @@ def get_current_user(
     if scheme.lower() != "bearer" or not token:
         raise UnauthorizedError("Bearer token is required")
 
-    subject = decode_access_token(token)
-    if not subject:
+    payload = decode_access_token(token)
+    if not payload:
         raise UnauthorizedError("Invalid or expired token")
 
+    subject = payload.get("sub")
     try:
-        user_id = uuid.UUID(subject)
+        user_id = uuid.UUID(str(subject))
     except ValueError as exc:
         raise UnauthorizedError("Invalid token subject") from exc
 
@@ -126,6 +218,10 @@ def get_current_user(
         raise UnauthorizedError("User no longer exists")
     if user.status != UserStatus.ACTIVE:
         raise PermissionDeniedError("User account is not active")
+
+    sid = payload.get("sid")
+    if sid and _resolve_active_session(db, str(sid), user) is None:
+        raise UnauthorizedError("Session is no longer valid")
 
     return user
 

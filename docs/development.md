@@ -59,8 +59,10 @@ npm run dev                     # http://localhost:3000
 
 ## Logging in
 
-Open `http://localhost:3000`, click **Sign in** and use any seed user (the
-dev-login button fills the admin automatically):
+Open `http://localhost:3000`, sign in with any seed user and the shared demo
+password `pallia123`.
+
+Organization **A — Maple Grove Home Care** (`@pallia.demo`):
 
 | Email                    | Name              | Role             |
 | ------------------------ | ----------------- | ---------------- |
@@ -70,10 +72,20 @@ dev-login button fills the admin automatically):
 | `nurse2@pallia.demo`     | Kiran Menon       | NURSE            |
 | `doctor@pallia.demo`     | Dr. Lakshmi Rao   | DOCTOR           |
 | `caregiver@pallia.demo`  | Priya Verma       | CAREGIVER        |
+| `patient@pallia.demo`    | Lakshmi Devi      | PATIENT          |
 
-The seed users have no passwords in Phase 1 — auth is a development-only
-email exchange (`POST /api/v1/auth/dev-login`) that issues a signed bearer
-token, valid for 12 hours.
+Organization **B — Willow Creek Hospice** (`@willowcreek.demo`):
+
+| Email                     | Name                   | Role             |
+| ------------------------- | ---------------------- | ---------------- |
+| `admin@willowcreek.demo`  | (seed)                 | ADMIN            |
+| `nurse@willowcreek.demo`  | (seed)                 | NURSE            |
+| `caregiver@willowcreek.demo` | (seed)               | CAREGIVER        |
+| `patient@willowcreek.demo`| (seed)                 | PATIENT          |
+
+Auth is real in Phase 2: passwords are Argon2id-hashed, login is rate limited,
+and sessions are recorded in `auth_sessions`. `dev-login` (email-only) still
+works in development.
 
 ## Everyday commands
 
@@ -106,25 +118,37 @@ Keep all four green before finishing a change.
 
 See [architecture.md](architecture.md) for the layout, layering and data flow.
 
-## API surface (Phase 1)
+## API surface
 
 Authoritative list — inspect `GET /openapi.json` on the running API for the
 full set.
 
 ```
-POST /api/v1/auth/dev-login   exchange seed user email for a bearer token
-GET  /api/v1/auth/me          current user + organization
+POST /api/v1/auth/login      email + password → access token + refresh cookie
+POST /api/v1/auth/refresh    rotate refresh session (cookie or body)
+POST /api/v1/auth/logout     revoke session, clear cookie
+GET  /api/v1/auth/me         current user + organization + permissions
+POST /api/v1/auth/dev-login  dev-only: email → token (ENVIRONMENT=development)
 
 GET  /api/v1/dashboard/summary   patients/care-plan/today-visits/open-task counts + lists
 
 GET/POST /api/v1/patients                 list (status/query) · create
 GET/PATCH /api/v1/patients/{patient_id}   detail · update
-GET       /api/v1/patients/{patient_id}/timeline         timeline events
-GET       /api/v1/patients/{patient_id}/care-team        care team members
-GET/PUT   /api/v1/patients/{patient_id}/care-plan        care plan + goals
-GET/POST  /api/v1/patients/{patient_id}/observations     patient observations
-GET/POST  /api/v1/patients/{patient_id}/visits           patient visits
-GET/POST  /api/v1/patients/{patient_id}/tasks            patient care tasks
+GET       /api/v1/patients/{patient_id}/timeline          timeline events (?kind=…)
+GET       /api/v1/patients/{patient_id}/care-team         care team members
+GET/PUT   /api/v1/patients/{patient_id}/care-plan         care plan (update status/summary)
+POST      /api/v1/patients/{patient_id}/care-plan/goals   add a care goal
+PATCH     /api/v1/patients/{patient_id}/care-plan/goals/{goal_id}   goal status/priority
+GET/POST  /api/v1/patients/{patient_id}/observations      patient observations
+GET       /api/v1/patients/{patient_id}/observations/recent   "what changed?" comparisons
+POST      /api/v1/patients/{patient_id}/observations/confirm   confirm reviewed observations
+GET/POST  /api/v1/patients/{patient_id}/visits            patient visits
+GET/POST  /api/v1/patients/{patient_id}/tasks             patient care tasks
+GET/POST  /api/v1/patients/{patient_id}/caregiver-reports          reports · create
+PATCH     /api/v1/patients/{patient_id}/caregiver-reports/{id}     update (transcript/notes)
+POST      /api/v1/patients/{patient_id}/caregiver-reports/{id}/cancel  cancel a report
+POST      /api/v1/patients/{patient_id}/voice/transcribe   audio → transcript (multipart)
+POST      /api/v1/patients/{patient_id}/voice/extract      transcript → draft observations
 
 GET/POST /api/v1/observations        observations (org-wide) · record
 GET/POST /api/v1/visits              visits (future/past/status) · create
@@ -138,8 +162,37 @@ GET/POST /api/v1/users               users · create
 GET       /api/v1/organizations      organizations
 ```
 
+### Caregiver reports & voice (Phase 3)
+
+The `VOICE` flow: create a report → `POST .../voice/transcribe` (audio upload)
+→ `POST .../voice/extract` → review the draft → `POST .../observations/confirm`.
+Manual modes (`QUICK_STATUS`, `STRUCTURED`, `TEXT`) create confirmed
+observations in one step. Everything stays scoped: a `CAREGIVER` only touches
+their linked patients, and staff are org-wide.
+
+Provider-driven seams (`ENVIRONMENT=development` defaults in `app/core/config.py`):
+
+- `SPEECH_PROVIDER=local` — treats the "audio" upload as UTF-8 text (offline
+  testing); `openai` lazily pulls in Whisper and returns 503
+  (`VOICE_SERVICE_UNAVAILABLE`) when `openai` isn't installed.
+- `AI_PROVIDER=local` — deterministic rule-based extraction; `openai` uses a
+  lazily-imported chat model (missing dependency → 503 `AI_SERVICE_UNAVAILABLE`,
+  extraction failure → 422 `AI_EXTRACTION_FAILED`).
+
+The extraction prompt (`v1`) explicitly forbids inventing values: anything the
+caregiver didn't say stays `not_mentioned`, and ambiguous phrasing keeps
+`value: null`. Confirmed observations are linked back to the source report
+(`source_reference`) with `ai_generated` / `human_verified` / `confidence` /
+`model_version` metadata.
+
+> Everything under `/api/v1` except `auth/login`, `auth/refresh` and
+> `auth/dev-login` requires `Authorization: Bearer <access token>`. Lists and
+> single-resource reads are scoped to the caller: staff see their whole
+> organization, `CAREGIVER` sees only linked patients, `PATIENT` sees their
+> own record (out-of-scope IDs return 404).
+
 > Roadmap routes live in the models but are not yet exposed: `alerts`,
-> `communications`, and full `care-teams` CRUD are Phase 2.
+> `communications`, and full `care-teams` CRUD are later phases.
 
 ## Troubleshooting
 
@@ -155,10 +208,12 @@ GET       /api/v1/organizations      organizations
 
 ## Seams for later phases
 
-- Swap `dev-login` for a real OIDC provider without touching the UI
-  (`apps/web/components/providers/auth-provider.tsx` wraps whatever issues
-  the token).
+- Swap the password login flow for a real OIDC provider without touching most
+  of the UI — `AuthProvider` already treats login as "get a token + user", and
+  the refresh cookie wrapper is isolated in the API client.
 - Move role→permission mapping from code constants
-  (`app/core/permissions.py`) into a per-user table.
+  (`app/core/permissions.py`) into a per-user/permission table.
+- Move login rate limiting from the in-memory limiter to a shared store
+  (Redis) once more than one API instance runs.
 - Introduce `Row Level Security` in Postgres for defense-in-depth beyond the
   service-layer scoping.

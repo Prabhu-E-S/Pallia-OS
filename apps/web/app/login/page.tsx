@@ -3,37 +3,36 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { HeartPulse } from "lucide-react";
-import { authApi } from "@/lib/api/auth";
 import { ApiErrorResponse } from "@/lib/api/client";
 import { AuthProvider, useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Field, Input } from "@/components/ui/field";
 
-const DEMO_ACCOUNTS = [
-  { email: "admin@pallia.demo", label: "Administrator" },
-  { email: "coordinator@pallia.demo", label: "Care coordinator" },
-  { email: "nurse@pallia.demo", label: "Nurse (Savitri Rao)" },
-  { email: "nurse2@pallia.demo", label: "Nurse (Meera Nair)" },
-  { email: "doctor@pallia.demo", label: "Doctor" },
-  { email: "caregiver@pallia.demo", label: "Caregiver" },
+const DEMO_HINT = [
+  "admin@pallia.demo",
+  "coordinator@pallia.demo",
+  "nurse@pallia.demo",
+  "doctor@pallia.demo",
+  "caregiver@pallia.demo",
+  "patient@pallia.demo",
 ];
 
 function LoginForm() {
   const router = useRouter();
   const { login } = useAuth();
-  const [email, setEmail] = useState(DEMO_ACCOUNTS[1].email);
+  const [email, setEmail] = useState("admin@pallia.demo");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || !email.trim() || !password) return;
     setSubmitting(true);
     setError(null);
     try {
-      const response = await authApi().devLogin(email.trim());
-      login({ token: response.access_token, user: response.user });
-      router.push("/dashboard");
+      await login(email.trim(), password);
+      router.replace("/dashboard");
     } catch (err) {
       const message =
         err instanceof ApiErrorResponse ? err.message : "Unable to sign in. Is the API running?";
@@ -52,37 +51,34 @@ function LoginForm() {
           <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">
             Pallia OS
           </h1>
-          <p className="mt-1 text-sm text-muted">
-            Sign in to your care workspace
-          </p>
+          <p className="mt-1 text-sm text-muted">Sign in to your care workspace</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
           className="rounded-xl border border-line bg-surface p-6 shadow-card"
         >
-          <Field label="Demo account" htmlFor="demo-account">
-            <Select
-              id="demo-account"
+          <Field label="Email" htmlFor="email">
+            <Input
+              id="email"
+              type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-            >
-              {DEMO_ACCOUNTS.map((account) => (
-                <option key={account.email} value={account.email}>
-                  {account.label}
-                </option>
-              ))}
-            </Select>
+              autoComplete="email"
+              required
+            />
           </Field>
 
           <div className="mt-4">
-            <Field label="Email" htmlFor="email">
+            <Field label="Password" htmlFor="password">
               <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
+                id="password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                placeholder="••••••••••"
+                required
               />
             </Field>
           </div>
@@ -99,7 +95,10 @@ function LoginForm() {
         </form>
 
         <p className="mt-6 text-center text-xs text-muted">
-          Development login — replaces production authentication in Phase 1.
+          Demo password: <span className="font-medium text-slate-600">pallia123</span>
+        </p>
+        <p className="mt-1.5 text-center text-xs">
+          {DEMO_HINT.join(" · ")}
         </p>
       </div>
     </div>

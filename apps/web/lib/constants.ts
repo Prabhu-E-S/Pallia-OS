@@ -6,6 +6,7 @@
 export const STATUS_LABELS: Record<string, string> = {
   ACTIVE: "Active",
   INACTIVE: "Inactive",
+  SUSPENDED: "Suspended",
   DISCHARGED: "Discharged",
   DECEASED: "Deceased",
   TRANSFERRED: "Transferred",
@@ -76,6 +77,7 @@ export const ROLE_LABELS: Record<string, string> = {
   NURSE: "Nurse",
   DOCTOR: "Doctor",
   CAREGIVER: "Caregiver",
+  PATIENT: "Patient",
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
@@ -83,6 +85,31 @@ export const SOURCE_LABELS: Record<string, string> = {
   CAREGIVER_APP: "Caregiver app",
   PHONE: "Phone",
   OTHER: "Other",
+  CAREGIVER_TEXT: "Caregiver update",
+  CAREGIVER_VOICE: "Voice update",
+};
+
+export const REPORT_MODE_LABELS: Record<string, string> = {
+  QUICK_STATUS: "Quick status",
+  STRUCTURED: "Structured",
+  TEXT: "Text",
+  VOICE: "Voice",
+};
+
+export const REPORT_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Draft",
+  PROCESSING: "Processing",
+  REVIEW_REQUIRED: "Needs review",
+  CONFIRMED: "Confirmed",
+  CANCELLED: "Cancelled",
+};
+
+export const COMPARISON_LABELS: Record<string, string> = {
+  increased: "Increased",
+  decreased: "Decreased",
+  unchanged: "Unchanged",
+  changed: "Changed",
+  first: "First",
 };
 
 type Tone = "neutral" | "teal" | "emerald" | "amber" | "rose" | "sky" | "violet";
@@ -118,6 +145,9 @@ export function statusTone(status: string): Tone {
     case "LOW":
     case "NORMAL":
       return "neutral";
+    case "REVIEW_REQUIRED":
+    case "PROCESSING":
+      return "amber";
     default:
       return "neutral";
   }
@@ -133,6 +163,9 @@ export function activityLabel(kind: string): string {
       return "Task";
     case "communication":
       return "Communication";
+    case "caregiver_report":
+    case "caregiver_update":
+      return "Caregiver update";
     case "patient":
       return "Patient";
     default:

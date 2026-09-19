@@ -1,10 +1,13 @@
 """Domain models package. All models must be imported here so SQLAlchemy
 configures them on startup and Alembic can discover the metadata."""
 
+from app.models import auth as _auth  # noqa: F401
 from app.models import care as _care  # noqa: F401  (registers table metadata)
+from app.models import caregiver_reports as _caregiver_reports  # noqa: F401
 from app.models import clinical as _clinical  # noqa: F401
 from app.models import communications as _communications  # noqa: F401
 from app.models import organization as _organization  # noqa: F401
+from app.models.auth import AuthSession
 from app.models.care import (
     Caregiver,
     CareGoal,
@@ -14,6 +17,7 @@ from app.models.care import (
     PatientCaregiver,
     PatientCareTeamMember,
 )
+from app.models.caregiver_reports import CaregiverReport
 from app.models.clinical import (
     CareTask,
     MedicationPlan,
@@ -32,6 +36,8 @@ from app.models.enums import (
     AlertStatus,
     AlertType,
     CaregiverRelationship,
+    CaregiverReportMode,
+    CaregiverReportStatus,
     CareGoalPriority,
     CareGoalStatus,
     CarePlanStatus,
@@ -61,6 +67,7 @@ __all__ = [
     "AlertType",
     "Attachment",
     "AuditLog",
+    "AuthSession",
     "CareGoal",
     "CareGoalPriority",
     "CareGoalStatus",
@@ -73,6 +80,9 @@ __all__ = [
     "CareTeam",
     "Caregiver",
     "CaregiverRelationship",
+    "CaregiverReport",
+    "CaregiverReportMode",
+    "CaregiverReportStatus",
     "Communication",
     "CommunicationType",
     "Consent",

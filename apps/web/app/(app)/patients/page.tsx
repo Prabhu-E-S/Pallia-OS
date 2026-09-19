@@ -6,6 +6,7 @@ import { Search, UserPlus } from "lucide-react";
 import { patientsApi } from "@/lib/api/patients";
 import { ApiErrorResponse } from "@/lib/api/client";
 import type { PatientSummary } from "@/lib/api/types";
+import { useAuth } from "@/components/providers/auth-provider";
 import { PageHeader } from "@/components/ui/page";
 import { Table } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
@@ -26,6 +27,7 @@ const STATUS_FILTERS = [
 
 export default function PatientsPage() {
   const router = useRouter();
+  const { canAccess } = useAuth();
   const [items, setItems] = useState<PatientSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +71,15 @@ export default function PatientsPage() {
         title="Patients"
         description={`${items.length} people under care`}
         actions={
-          <Button onClick={() => router.push("/dashboard")} variant="secondary">
-            <UserPlus className="h-4 w-4" aria-hidden />
-            New patient
-          </Button>
+          canAccess("patient.create") ? (
+            <Button
+              onClick={() => router.push("/dashboard")}
+              variant="secondary"
+            >
+              <UserPlus className="h-4 w-4" aria-hidden />
+              New patient
+            </Button>
+          ) : undefined
         }
       />
 

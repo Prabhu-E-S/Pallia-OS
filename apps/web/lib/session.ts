@@ -1,50 +1,22 @@
-import type { CurrentUser } from "@/lib/api/types";
+/**
+ * In-memory access-token store.
+ *
+ * Tokens intentionally live only in JS memory, never in localStorage or
+ * cookies: after a full page load the access token is gone and the auth
+ * provider re-establishes the session from the HttpOnly refresh cookie
+ * (`/auth/refresh`). The refresh token itself is never visible to JS.
+ */
 
-const SESSION_KEY = "pallia.session";
+let accessToken: string | null = null;
 
-export interface Session {
-  token: string;
-  user: CurrentUser;
+export function getAccessToken(): string | null {
+  return accessToken;
 }
 
-function isBrowser(): boolean {
-  return typeof window !== "undefined";
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
 }
 
-function readRaw(): string | null {
-  try {
-    return isBrowser() ? window.localStorage.getItem(SESSION_KEY) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function getSession(): Session | null {
-  const raw = readRaw();
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Session;
-    if (!parsed.token || !parsed.user?.id) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function setSession(session: Session): void {
-  if (!isBrowser()) return;
-  try {
-    window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  } catch {
-    /* storage unavailable — session won't persist across reloads */
-  }
-}
-
-export function clearSession(): void {
-  if (!isBrowser()) return;
-  try {
-    window.localStorage.removeItem(SESSION_KEY);
-  } catch {
-    /* ignore */
-  }
+export function clearAccessToken(): void {
+  accessToken = null;
 }

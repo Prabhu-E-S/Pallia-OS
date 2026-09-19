@@ -1,9 +1,10 @@
 """Organization and User entities."""
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
-from sqlalchemy import Enum, String, Uuid
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.enums import OrganizationStatus, OrganizationType, UserRole, UserStatus
@@ -51,7 +52,14 @@ class User(OrganizationScopedMixin, TimestampMixin):
         default=UserStatus.ACTIVE,
     )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    patient_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     organization: Mapped[Organization] = relationship(back_populates="users")
 
     caregivers: Mapped[list["Caregiver"]] = relationship(back_populates="user")
+    auth_sessions: Mapped[list["AuthSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )

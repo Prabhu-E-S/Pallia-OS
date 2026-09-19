@@ -7,6 +7,7 @@ from app.models.enums import CareTaskPriority, CareTaskType
 from app.schemas.task import CareTaskCreate, CareTaskOut, CareTaskUpdate
 from app.services import audit
 from app.services import users as user_services
+from app.services.authorization import scoped_patient_ids, where_patient_scope
 from app.services.patients import get_patient
 
 OPEN_STATUSES = ("CREATED", "ASSIGNED", "ACCEPTED", "IN_PROGRESS")
@@ -109,6 +110,7 @@ def list_organization(db: Session, actor: User) -> list[CareTaskOut]:
         .order_by(CareTask.created_at.desc())
         .limit(200)
     )
+    stmt = where_patient_scope(stmt, CareTask.patient_id, scoped_patient_ids(db, actor))
     return [_task_out(db, t) for t in db.scalars(stmt)]
 
 
@@ -122,6 +124,7 @@ def list_open_tasks(db: Session, actor: User, limit: int = 10) -> list[CareTaskO
         .order_by(CareTask.created_at.desc())
         .limit(limit)
     )
+    stmt = where_patient_scope(stmt, CareTask.patient_id, scoped_patient_ids(db, actor))
     return [_task_out(db, t) for t in db.scalars(stmt)]
 
 
@@ -138,5 +141,8 @@ def get_task_in_org(db: Session, actor: User, task_id: str) -> CareTask:
         )
     )
     if task is None:
+        raise NotFoundError("Task not found")
+    allowed = scoped_patient_ids(db, actor)
+    if allowed is not None and task.patient_id not in allowed:
         raise NotFoundError("Task not found")
     return task

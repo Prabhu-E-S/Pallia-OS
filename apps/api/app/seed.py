@@ -1,10 +1,12 @@
 """Development / demo seed data.
 
-Creates one organization plus realistic but entirely FICTIONAL patients,
-users, care plans, observations, visits and tasks.
+Creates two organizations with realistic but entirely FICTIONAL patients,
+users (every role, with passwords), care plans, observations, visits and
+tasks. A PATIENT and a CAREGIVER account are provided per organization so the
+object-level authorization rules can be demoed end to end.
 
 This data must never contain real patient information. The script is
-idempotent: it skips seeding when the demo organization already exists.
+idempotent: it skips an organization that already exists.
 
 Run with: python -m app.seed
 """
@@ -14,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_password
 from app.models import (
     Alert,
     AlertSeverity,
@@ -21,6 +24,9 @@ from app.models import (
     AlertType,
     Caregiver,
     CaregiverRelationship,
+    CaregiverReport,
+    CaregiverReportMode,
+    CaregiverReportStatus,
     CareGoal,
     CareGoalPriority,
     CareGoalStatus,
@@ -53,59 +59,86 @@ from app.models import (
     VisitStatus,
 )
 
-DEMO_ORG_NAME = "Demo Palliative Care"
 DEMO_PASSWORD = "pallia123"
+
+ORG_A = {
+    "name": "Maple Grove Home Care",
+    "type": OrganizationType.HOME_CARE,
+    "domain": "pallia.demo",
+}
+ORG_B = {
+    "name": "Willow Creek Hospice",
+    "type": OrganizationType.HOSPICE,
+    "domain": "willowcreek.demo",
+}
 
 
 def _utc(hours_offset: float) -> datetime:
     return datetime.now(UTC) + timedelta(hours=hours_offset)
 
 
-def _organizations_and_users() -> tuple[Organization, list[User]]:
+def _user(*, email: str, full_name: str, role: UserRole, phone: str | None = None) -> User:
+    return User(
+        email=email,
+        full_name=full_name,
+        phone=phone,
+        role=role,
+        password_hash=hash_password(DEMO_PASSWORD),
+    )
+
+
+def _organizations_and_users(org_spec: dict) -> tuple[Organization, dict[str, User]]:
     org = Organization(
-        name=DEMO_ORG_NAME,
-        type=OrganizationType.HOME_CARE,
+        name=org_spec["name"],
+        type=org_spec["type"],
         status=OrganizationStatus.ACTIVE,
     )
-    admin = User(email="admin@pallia.demo", full_name="Ananya Sharma", role=UserRole.ADMIN)
-    coordinator = User(
-        email="coordinator@pallia.demo",
-        full_name="Ravi Iyer",
-        phone="+91 98765 40001",
-        role=UserRole.CARE_COORDINATOR,
-    )
-    nurse = User(
-        email="nurse@pallia.demo",
-        full_name="Meera Nair",
-        phone="+91 98765 40002",
-        role=UserRole.NURSE,
-    )
-    nurse2 = User(
-        email="nurse2@pallia.demo",
-        full_name="Kiran Menon",
-        phone="+91 98765 40003",
-        role=UserRole.NURSE,
-    )
-    doctor = User(
-        email="doctor@pallia.demo",
-        full_name="Dr. Lakshmi Rao",
-        phone="+91 98765 40004",
-        role=UserRole.DOCTOR,
-    )
-    caregiver_user = User(
-        email="caregiver@pallia.demo",
-        full_name="Priya Verma",
-        phone="+91 98765 40005",
-        role=UserRole.CAREGIVER,
-    )
-    users = [admin, coordinator, nurse, nurse2, doctor, caregiver_user]
-    for u in users:
+    domain = org_spec["domain"]
+    users = {
+        "admin": _user(email=f"admin@{domain}", full_name="Ananya Sharma", role=UserRole.ADMIN),
+        "coordinator": _user(
+            email=f"coordinator@{domain}",
+            full_name="Ravi Iyer",
+            phone="+91 98765 40001",
+            role=UserRole.CARE_COORDINATOR,
+        ),
+        "nurse": _user(
+            email=f"nurse@{domain}",
+            full_name="Meera Nair",
+            phone="+91 98765 40002",
+            role=UserRole.NURSE,
+        ),
+        "nurse2": _user(
+            email=f"nurse2@{domain}",
+            full_name="Kiran Menon",
+            phone="+91 98765 40003",
+            role=UserRole.NURSE,
+        ),
+        "doctor": _user(
+            email=f"doctor@{domain}",
+            full_name="Dr. Lakshmi Rao",
+            phone="+91 98765 40004",
+            role=UserRole.DOCTOR,
+        ),
+        "caregiver": _user(
+            email=f"caregiver@{domain}",
+            full_name="Priya Verma",
+            phone="+91 98765 40005",
+            role=UserRole.CAREGIVER,
+        ),
+        "patient": _user(
+            email=f"patient@{domain}",
+            full_name="Lakshmi Devi",
+            role=UserRole.PATIENT,
+        ),
+    }
+    for u in users.values():
         u.organization = org
     return org, users
 
 
-def _patients(org: Organization) -> list[Patient]:
-    patients = [
+def _patients_maple_grove(org: Organization) -> list[Patient]:
+    return [
         Patient(
             organization_id=org.id,
             full_name="Amma Lakshmi",
@@ -179,19 +212,60 @@ def _patients(org: Organization) -> list[Patient]:
             status=PatientStatus.ACTIVE,
         ),
     ]
-    return patients
+
+
+def _patients_willow_creek(org: Organization) -> list[Patient]:
+    return [
+        Patient(
+            organization_id=org.id,
+            full_name="Gopal Metha",
+            date_of_birth=date(1944, 12, 1),
+            gender=Gender.MALE,
+            phone="+91 98800 30001",
+            address="2 Palm Avenue, Bengaluru",
+            preferred_language="Kannada",
+            emergency_contact_name="Rekha Metha",
+            emergency_contact_phone="+91 98800 40001",
+            status=PatientStatus.ACTIVE,
+        ),
+        Patient(
+            organization_id=org.id,
+            full_name="Sunita Rao",
+            date_of_birth=date(1958, 4, 22),
+            gender=Gender.FEMALE,
+            phone="+91 98800 30002",
+            address="9 Lilly Road, Mysuru",
+            preferred_language="Kannada",
+            emergency_contact_name="Anand Rao",
+            emergency_contact_phone="+91 98800 40002",
+            status=PatientStatus.ACTIVE,
+        ),
+        Patient(
+            organization_id=org.id,
+            full_name="Kamal De",
+            date_of_birth=date(1951, 6, 14),
+            gender=Gender.MALE,
+            phone="+91 98800 30003",
+            address="15 Lake View, Kolkata",
+            preferred_language="Bengali",
+            emergency_contact_name="Maya De",
+            emergency_contact_phone="+91 98800 40003",
+            status=PatientStatus.ACTIVE,
+        ),
+    ]
 
 
 def _add_bundles(
     db: Session,
     org: Organization,
-    coordinator: User,
-    nurse: User,
-    nurse2: User,
-    doctor: User,
-    caregiver_user: User,
+    users: dict[str, User],
     patients: list[Patient],
 ) -> None:
+    coordinator = users["coordinator"]
+    nurse = users["nurse"]
+    nurse2 = users["nurse2"]
+    doctor = users["doctor"]
+    caregiver_user = users["caregiver"]
 
     caregiver = Caregiver(
         organization_id=org.id,
@@ -332,8 +406,8 @@ def _add_bundles(
             ]
         )
 
-        date = _utc(-index).strftime("%d %b")
-        content = f"Caregiver updated family behaviours during visit on {date}."
+        date_label = _utc(-index).strftime("%d %b")
+        content = f"Caregiver updated family behaviours during visit on {date_label}."
         db.add(
             Communication(
                 organization_id=org.id,
@@ -368,7 +442,7 @@ def _add_bundles(
             ),
             Alert(
                 organization_id=org.id,
-                patient_id=patients[2].id,
+                patient_id=patients[min(2, len(patients) - 1)].id,
                 type=AlertType.VISIT,
                 severity=AlertSeverity.INFO,
                 title="Upcoming review visit",
@@ -379,26 +453,206 @@ def _add_bundles(
     )
 
 
-def seed(db: Session) -> None:
-    existing = db.scalar(select(Organization).where(Organization.name == DEMO_ORG_NAME))
-    if existing is not None:
-        print(f"Demo organization already seeded ({DEMO_ORG_NAME}); skipping.")
+def _seed_caregiver_reports(db: Session, org: Organization) -> None:
+    """Add Phase 3 caregiver report data.
+
+    Idempotent per organization: skipped when the org already has reports, so
+    re-seeding a database that was seeded in Phase 2 simply adds the Phase 3
+    content without duplicating anything.
+    """
+    if db.scalar(
+        select(CaregiverReport.id).where(CaregiverReport.organization_id == org.id).limit(1)
+    ):
+        print(f"Organisation '{org.name}' already has caregiver reports; skipping Phase 3 data.")
         return
 
-    org, users = _organizations_and_users()
-    db.add(org)
+    domain = "pallia.demo" if org.name == ORG_A["name"] else "willowcreek.demo"
+
+    def org_user(email: str) -> User:
+        user = db.scalar(select(User).where(User.organization_id == org.id, User.email == email))
+        if user is None:  # pragma: no cover - seed data defines these emails.
+            raise RuntimeError(f"Missing seeded user '{email}' in '{org.name}'")
+        return user
+
+    caregiver = org_user(f"caregiver@{domain}")
+    patients = list(
+        db.scalars(
+            select(Patient)
+            .where(Patient.organization_id == org.id)
+            .order_by(Patient.created_at.asc())
+        )
+    )
+    if not patients:
+        return
+
+    primary = patients[0]
+    secondary = patients[1] if len(patients) > 1 else patients[0]
+    reported_on = _utc(-1)
+    earlier = _utc(-2)
+
+    quick = CaregiverReport(
+        organization_id=org.id,
+        patient_id=primary.id,
+        recorded_by=caregiver.id,
+        reported_at=reported_on,
+        mode=CaregiverReportMode.QUICK_STATUS,
+        status=CaregiverReportStatus.CONFIRMED,
+        pain_level=5,
+        notes="Some discomfort after dinner; a warm compress helped settle it.",
+        human_verified=True,
+        confirmed_at=reported_on,
+        confirmed_by=caregiver.id,
+    )
+    db.add(quick)
     db.flush()
+    db.add(
+        Observation(
+            organization_id=org.id,
+            patient_id=primary.id,
+            recorded_by=caregiver.id,
+            type=ObservationType.PAIN,
+            value="5",
+            unit="scale 0-10",
+            observed_at=reported_on,
+            source=ObservationSource.CAREGIVER_TEXT,
+            source_reference=quick.id,
+            ai_generated=False,
+            human_verified=True,
+        )
+    )
 
-    _admin, coordinator, nurse, nurse2, doctor, caregiver_user = users
-
-    patients = _patients(org)
-    db.add_all(patients)
+    structured = CaregiverReport(
+        organization_id=org.id,
+        patient_id=secondary.id,
+        recorded_by=caregiver.id,
+        reported_at=earlier,
+        mode=CaregiverReportMode.STRUCTURED,
+        status=CaregiverReportStatus.CONFIRMED,
+        sleep_hours="6",
+        food_intake="ate well",
+        mood="calm",
+        general_concern="A little worried about the review visit next week.",
+        human_verified=True,
+        confirmed_at=earlier,
+        confirmed_by=caregiver.id,
+    )
+    db.add(structured)
     db.flush()
+    for _field, obs_type, unit, value in (
+        ("sleep_hours", ObservationType.SLEEP, "hours", "6"),
+        ("food_intake", ObservationType.FOOD_INTAKE, None, "ate well"),
+        ("mood", ObservationType.MOOD, None, "calm"),
+    ):
+        db.add(
+            Observation(
+                organization_id=org.id,
+                patient_id=secondary.id,
+                recorded_by=caregiver.id,
+                type=obs_type,
+                value=value,
+                unit=unit,
+                observed_at=earlier,
+                source=ObservationSource.CAREGIVER_TEXT,
+                source_reference=structured.id,
+                ai_generated=False,
+                human_verified=True,
+            )
+        )
 
-    _add_bundles(db, org, coordinator, nurse, nurse2, doctor, caregiver_user, patients)
+    text = CaregiverReport(
+        organization_id=org.id,
+        patient_id=primary.id,
+        recorded_by=caregiver.id,
+        reported_at=_utc(-3),
+        mode=CaregiverReportMode.TEXT,
+        status=CaregiverReportStatus.CONFIRMED,
+        notes="Rested most of the afternoon. Took a short walk to the garden "
+        "and sat outside until the sun moved.",
+        human_verified=True,
+        confirmed_at=_utc(-3),
+        confirmed_by=caregiver.id,
+    )
+    db.add(text)
+
+    # A voice report left in the review step so the record/transcribe/extract/
+    # confirm flow can be demonstrated and continued by a human reviewer.
+    voice_reported = _utc(-4)
+    voice = CaregiverReport(
+        organization_id=org.id,
+        patient_id=primary.id,
+        recorded_by=caregiver.id,
+        reported_at=voice_reported,
+        mode=CaregiverReportMode.VOICE,
+        status=CaregiverReportStatus.REVIEW_REQUIRED,
+        transcript="She said pain is six out of ten this morning and she slept "
+        "about five hours. No complaint about food.",
+        audio_duration_seconds=23,
+        ai_generated=True,
+        provider="local",
+        model="local-rules-v1",
+        model_version="v1",
+        confidence=0.9,
+        extraction={
+            "observations": [
+                {
+                    "type": "PAIN",
+                    "value": "6",
+                    "unit": "scale 0-10",
+                    "confidence": 0.9,
+                    "note": "Pain level reported as a number.",
+                },
+                {
+                    "type": "SLEEP",
+                    "value": "5",
+                    "unit": "hours",
+                    "confidence": 0.9,
+                    "note": "Sleep duration reported in hours.",
+                },
+            ],
+            "not_mentioned": ["MOBILITY", "MOOD", "BREATHING", "ENERGY", "OTHER"],
+            "summary": "Update mentions: PAIN, SLEEP.",
+        },
+    )
+    db.add(voice)
+
     db.commit()
+    print(f"Seeded Phase 3 caregiver reports for '{org.name}'.")
 
-    print(f"Seeded demo organization '{DEMO_ORG_NAME}' with {len(patients)} patients.")
+
+def seed(db: Session) -> None:
+    for org_spec in (ORG_A, ORG_B):
+        existing = db.scalar(select(Organization).where(Organization.name == org_spec["name"]))
+        if existing is not None:
+            print(f"Organization already seeded '{org_spec['name']}'; skipping.")
+            continue
+
+        org, users = _organizations_and_users(org_spec)
+        db.add(org)
+        db.flush()
+
+        if org_spec["name"] == ORG_A["name"]:
+            patients = _patients_maple_grove(org)
+        else:
+            patients = _patients_willow_creek(org)
+        db.add_all(patients)
+        db.flush()
+
+        # The PATIENT account is linked to the first patient record.
+        users["patient"].patient_id = patients[0].id
+
+        _add_bundles(db, org, users, patients)
+        db.commit()
+
+        print(
+            f"Seeded '{org_spec['name']}' with {len(patients)} patients and "
+            f"{len(users)} user accounts (password: {DEMO_PASSWORD})."
+        )
+
+    # Phase 3 data is added for both fresh and already-seeded organizations.
+    for org_spec in (ORG_A, ORG_B):
+        org = db.scalar(select(Organization).where(Organization.name == org_spec["name"]))
+        if org is not None:
+            _seed_caregiver_reports(db, org)
 
 
 def main() -> None:
