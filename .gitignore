@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Environment / secrets
+.env
+.env.local
+.env*.local
+
+# Build output
+.next/
+out/
+dist/
+build/
+*.egg-info/
+
+# Test output
+coverage/
+.coverage
+*.pytest_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Pycharm
+.idea/

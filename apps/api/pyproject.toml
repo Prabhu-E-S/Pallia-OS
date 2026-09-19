@@ -1,0 +1,17 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = ["migrations/versions", ".venv", ".pytest_cache", ".ruff_cache"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+# B008: FastAPI convention is calling Depends()/Header() in defaults.
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Forward references like Mapped[list["Observation"]] are resolved by
+# SQLAlchemy at mapper configuration time, not at import time.
+"app/models/*.py" = ["F821"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
